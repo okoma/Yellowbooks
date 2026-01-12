@@ -9,6 +9,7 @@ namespace App\Filament\Business\Resources\BranchResource\Pages;
 use App\Filament\Business\Resources\BranchResource;
 use App\Models\Amenity;
 use App\Models\PaymentMethod;
+use App\Models\Location;
 use Filament\Forms;
 use Filament\Forms\Components\Wizard;
 use Filament\Resources\Pages\CreateRecord;
@@ -40,15 +41,14 @@ class CreateBranch extends CreateRecord
                         )
                         ->live()
                         ->afterStateUpdated(function ($state, Forms\Set $set, Forms\Get $get) {
-                            // Auto-generate branch title when business is selected
                             $businessId = $state;
-                            $cityId = $get('city_id');
+                            $cityId = $get('city_location_id');
                             
                             if ($businessId) {
                                 $business = \App\Models\Business::find($businessId);
                                 if ($business) {
                                     if ($cityId) {
-                                        $city = \App\Models\Location::find($cityId);
+                                        $city = Location::find($cityId);
                                         $branchTitle = $business->business_name . ' - ' . $city->name;
                                     } else {
                                         $branchTitle = $business->business_name;
@@ -61,54 +61,61 @@ class CreateBranch extends CreateRecord
                         ->helperText('Select the parent business for this branch')
                         ->columnSpanFull(),
                     
-                    Forms\Components\Select::make('state_id')
+                    Forms\Components\Select::make('state_location_id')
                         ->label('State')
                         ->required()
                         ->searchable()
                         ->preload()
                         ->options(function () {
-                            return \App\Models\Location::where('type', 'state')
+                            return Location::where('type', 'state')
                                 ->where('is_active', true)
                                 ->orderBy('name')
                                 ->pluck('name', 'id');
                         })
                         ->live()
-                        ->afterStateUpdated(fn (Forms\Set $set) => $set('city_id', null)),
+                        ->afterStateUpdated(function (Forms\Set $set, $state) {
+                            $set('city_location_id', null);
+                            $stateName = Location::find($state)?->name;
+                            $set('state', $stateName);
+                        }),
                     
-                    Forms\Components\Select::make('city_id')
+                    Forms\Components\Select::make('city_location_id')
                         ->label('City')
                         ->required()
                         ->searchable()
                         ->preload()
                         ->options(function (Forms\Get $get) {
-                            $stateId = $get('state_id');
+                            $stateId = $get('state_location_id');
                             if (!$stateId) return [];
                             
-                            return \App\Models\Location::where('type', 'city')
+                            return Location::where('type', 'city')
                                 ->where('parent_id', $stateId)
                                 ->where('is_active', true)
                                 ->orderBy('name')
                                 ->pluck('name', 'id');
                         })
-                        ->disabled(fn (Forms\Get $get): bool => !$get('state_id'))
+                        ->disabled(fn (Forms\Get $get): bool => !$get('state_location_id'))
                         ->live()
                         ->afterStateUpdated(function ($state, Forms\Set $set, Forms\Get $get) {
-                            // Auto-generate branch title with city when city is selected
                             $businessId = $get('business_id');
                             $cityId = $state;
                             
                             if ($businessId && $cityId) {
                                 $business = \App\Models\Business::find($businessId);
-                                $city = \App\Models\Location::find($cityId);
+                                $city = Location::find($cityId);
                                 
                                 if ($business && $city) {
                                     $branchTitle = $business->business_name . ' - ' . $city->name;
                                     $set('branch_title', $branchTitle);
                                     $set('slug', \Illuminate\Support\Str::slug($branchTitle));
+                                    $set('city', $city->name);
                                 }
                             }
                         })
                         ->helperText('Select state first'),
+                    
+                    Forms\Components\Hidden::make('state'),
+                    Forms\Components\Hidden::make('city'),
                 ])
                 ->columns(2),
             
@@ -202,7 +209,8 @@ class CreateBranch extends CreateRecord
             Wizard\Step::make('Business Hours')
                 ->description('Set operating hours for this branch (optional - you can skip this step)')
                 ->schema([
-                    Forms\Components\Repeater::make('business_hours')
+                    Forms\Components\Repeater::make('business_hours_temp')
+                        ->label('Business Hours')
                         ->schema([
                             Forms\Components\Select::make('day')
                                 ->options([
@@ -229,7 +237,8 @@ class CreateBranch extends CreateRecord
                         ->columns(4)
                         ->defaultItems(0)
                         ->collapsible()
-                        ->itemLabel(fn (array $state): ?string => $state['day'] ?? null),
+                        ->itemLabel(fn (array $state): ?string => ucfirst($state['day'] ?? 'New Day'))
+                        ->helperText('Add your operating hours for each day'),
                 ])
                 ->columns(1),
             
@@ -258,7 +267,6 @@ class CreateBranch extends CreateRecord
                         ->multiple()
                         ->searchable()
                         ->preload()
-                        ->relationship('paymentMethods', 'name')
                         ->options(PaymentMethod::where('is_active', true)->pluck('name', 'id'))
                         ->helperText('Select all payment methods this branch accepts'),
                     
@@ -267,7 +275,6 @@ class CreateBranch extends CreateRecord
                         ->multiple()
                         ->searchable()
                         ->preload()
-                        ->relationship('amenities', 'name')
                         ->options(Amenity::where('is_active', true)->pluck('name', 'id'))
                         ->helperText('Select all amenities available at this branch'),
                     
@@ -308,7 +315,46 @@ class CreateBranch extends CreateRecord
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $data['is_active'] = true;
+        
+        // Transform business_hours
+        if (isset($data['business_hours_temp']) && is_array($data['business_hours_temp'])) {
+            $businessHours = [];
+            foreach ($data['business_hours_temp'] as $hours) {
+                if (isset($hours['day'])) {
+                    $businessHours[$hours['day']] = [
+                        'open' => $hours['open'] ?? null,
+                        'close' => $hours['close'] ?? null,
+                        'closed' => $hours['closed'] ?? false,
+                    ];
+                }
+            }
+            $data['business_hours'] = $businessHours;
+            unset($data['business_hours_temp']);
+        }
+        
+        // Extract relationship data
+        $paymentMethods = $data['payment_methods'] ?? [];
+        $amenities = $data['amenities'] ?? [];
+        
+        unset($data['payment_methods'], $data['amenities']);
+        
+        $this->paymentMethodsData = $paymentMethods;
+        $this->amenitiesData = $amenities;
+        
         return $data;
+    }
+    
+    protected function afterCreate(): void
+    {
+        $branch = $this->record;
+        
+        if (!empty($this->paymentMethodsData)) {
+            $branch->paymentMethods()->sync($this->paymentMethodsData);
+        }
+        
+        if (!empty($this->amenitiesData)) {
+            $branch->amenities()->sync($this->amenitiesData);
+        }
     }
     
     protected function getCreatedNotificationTitle(): ?string
@@ -320,4 +366,7 @@ class CreateBranch extends CreateRecord
     {
         return $this->getResource()::getUrl('view', ['record' => $this->getRecord()]);
     }
+    
+    protected array $paymentMethodsData = [];
+    protected array $amenitiesData = [];
 }
