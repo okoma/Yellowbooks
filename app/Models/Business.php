@@ -402,6 +402,210 @@ class Business extends Model
         return $directCount + $branchCount;
     }
 
+// ============================================
+// SEO & CONTENT QUALITY METHODS
+// ============================================
+
+/**
+ * Get the canonical URL for this business
+ */
+public function getCanonicalUrl()
+{
+    // If custom canonical URL is set, use it
+    if ($this->canonical_url) {
+        return $this->canonical_url;
+    }
+
+    // Default: self-referencing
+    return route('business.show', $this->slug);
+}
+
+/**
+ * Get meta title (auto-generate if not set)
+ */
+public function getMetaTitleAttribute($value)
+{
+    if ($value) {
+        return $value;
+    }
+
+    // Auto-generate: "Business Name | City, State"
+    return "{$this->business_name} | {$this->city}, {$this->state}";
+}
+
+/**
+ * Get meta description (auto-generate if not set)
+ */
+public function getMetaDescriptionAttribute($value)
+{
+    if ($value) {
+        return $value;
+    }
+
+    // Auto-generate from business description
+    return \Illuminate\Support\Str::limit($this->description, 155);
+}
+
+/**
+ * Check if business has sufficient unique content
+ */
+public function hasUniqueContent()
+{
+    return $this->has_unique_content;
+}
+
+/**
+ * Generate Schema.org JSON-LD markup for business
+ */
+public function getSchemaMarkup()
+{
+    $schema = [
+        '@context' => 'https://schema.org',
+        '@type' => $this->businessType->schema_type ?? 'LocalBusiness',
+        'name' => $this->business_name,
+        'description' => $this->description,
+        'url' => route('business.show', $this->slug),
+        'address' => [
+            '@type' => 'PostalAddress',
+            'streetAddress' => $this->address,
+            'addressLocality' => $this->city,
+            'addressRegion' => $this->state,
+            'addressCountry' => 'NG',
+        ],
+    ];
+
+    // Add contact info
+    if ($this->phone) {
+        $schema['telephone'] = $this->phone;
+    }
+
+    if ($this->email) {
+        $schema['email'] = $this->email;
+    }
+
+    if ($this->website) {
+        $schema['url'] = $this->website;
+    }
+
+    // Add geo coordinates
+    if ($this->latitude && $this->longitude) {
+        $schema['geo'] = [
+            '@type' => 'GeoCoordinates',
+            'latitude' => $this->latitude,
+            'longitude' => $this->longitude,
+        ];
+    }
+
+    // Add rating
+    if ($this->avg_rating && $this->total_reviews > 0) {
+        $schema['aggregateRating'] = [
+            '@type' => 'AggregateRating',
+            'ratingValue' => $this->avg_rating,
+            'reviewCount' => $this->total_reviews,
+        ];
+    }
+
+    // Add opening hours
+    if ($this->business_hours) {
+        $openingHours = [];
+        foreach ($this->business_hours as $day => $hours) {
+            if (!($hours['closed'] ?? false) && isset($hours['open'], $hours['close'])) {
+                $dayAbbr = ucfirst(substr($day, 0, 2));
+                $openingHours[] = "{$dayAbbr} {$hours['open']}-{$hours['close']}";
+            }
+        }
+        if (!empty($openingHours)) {
+            $schema['openingHours'] = $openingHours;
+        }
+    }
+
+    // Add logo
+    if ($this->logo) {
+        $schema['logo'] = asset('storage/' . $this->logo);
+    }
+
+    // Add image gallery
+    if ($this->gallery && count($this->gallery) > 0) {
+        $schema['image'] = array_map(fn($img) => asset('storage/' . $img), $this->gallery);
+    }
+
+    return $schema;
+}
+
+/**
+ * Get content quality score (0-100)
+ */
+public function getContentQualityScore()
+{
+    $score = 0;
+
+    // Has description (20 points)
+    if ($this->description && strlen($this->description) >= 100) {
+        $score += 20;
+    } elseif ($this->description) {
+        $score += 10;
+    }
+
+    // Has unique content flag (30 points)
+    if ($this->has_unique_content) {
+        $score += 30;
+    }
+
+    // Has photos (10 points)
+    if ($this->gallery && count($this->gallery) >= 3) {
+        $score += 10;
+    } elseif ($this->gallery && count($this->gallery) > 0) {
+        $score += 5;
+    }
+
+    // Has reviews (20 points)
+    if ($this->total_reviews >= 5) {
+        $score += 20;
+    } elseif ($this->total_reviews > 0) {
+        $score += 10;
+    }
+
+    // Has unique features (10 points)
+    if ($this->unique_features && count($this->unique_features) >= 3) {
+        $score += 10;
+    } elseif ($this->unique_features && count($this->unique_features) > 0) {
+        $score += 5;
+    }
+
+    // Has nearby landmarks (10 points)
+    if ($this->nearby_landmarks && strlen($this->nearby_landmarks) >= 50) {
+        $score += 10;
+    } elseif ($this->nearby_landmarks) {
+        $score += 5;
+    }
+
+    return $score;
+}
+
+/**
+ * Check if business is open now
+ */
+public function isOpen()
+{
+    if (!$this->business_hours) {
+        return null;
+    }
+
+    $day = strtolower(now()->format('l'));
+    $currentTime = now()->format('H:i');
+
+    if (!isset($this->business_hours[$day])) {
+        return false;
+    }
+
+    $hours = $this->business_hours[$day];
+    
+    if ($hours['closed'] ?? false) {
+        return false;
+    }
+
+    return $currentTime >= $hours['open'] && $currentTime <= $hours['close'];
+}
     // ============================================
     // ANALYTICS HELPER METHODS
     // ============================================
