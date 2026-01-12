@@ -1,7 +1,7 @@
 <?php
 // ============================================
 // app/Filament/Business/Resources/BusinessResource/Pages/EditBusiness.php
-// Edit business with wizard steps - Matching CreateBusiness pattern
+// FIXED VERSION - Matches CreateBusiness pattern
 // ============================================
 
 namespace App\Filament\Business\Resources\BusinessResource\Pages;
@@ -99,7 +99,7 @@ class EditBusiness extends EditRecord
             Wizard\Step::make('Location & Contact')
                 ->description('Where is your business located?')
                 ->schema([
-                    Forms\Components\Select::make('state_id')
+                    Forms\Components\Select::make('state_location_id')
                         ->label('State')
                         ->required()
                         ->searchable()
@@ -111,15 +111,19 @@ class EditBusiness extends EditRecord
                                 ->pluck('name', 'id');
                         })
                         ->live()
-                        ->afterStateUpdated(fn (Forms\Set $set) => $set('city_id', null)),
+                        ->afterStateUpdated(function (Forms\Set $set, $state) {
+                            $set('city_location_id', null);
+                            $stateName = Location::find($state)?->name;
+                            $set('state', $stateName);
+                        }),
                     
-                    Forms\Components\Select::make('city_id')
+                    Forms\Components\Select::make('city_location_id')
                         ->label('City')
                         ->required()
                         ->searchable()
                         ->preload()
                         ->options(function (Forms\Get $get) {
-                            $stateId = $get('state_id');
+                            $stateId = $get('state_location_id');
                             if (!$stateId) return [];
                             
                             return Location::where('type', 'city')
@@ -128,8 +132,16 @@ class EditBusiness extends EditRecord
                                 ->orderBy('name')
                                 ->pluck('name', 'id');
                         })
-                        ->disabled(fn (Forms\Get $get): bool => !$get('state_id'))
-                        ->helperText('Select state first'),
+                        ->disabled(fn (Forms\Get $get): bool => !$get('state_location_id'))
+                        ->helperText('Select state first')
+                        ->live()
+                        ->afterStateUpdated(function (Forms\Set $set, $state) {
+                            $cityName = Location::find($state)?->name;
+                            $set('city', $cityName);
+                        }),
+                    
+                    Forms\Components\Hidden::make('state'),
+                    Forms\Components\Hidden::make('city'),
                     
                     Forms\Components\TextInput::make('address')
                         ->required()
@@ -186,7 +198,8 @@ class EditBusiness extends EditRecord
             Wizard\Step::make('Business Hours')
                 ->description('Set your operating hours (optional - you can skip this step)')
                 ->schema([
-                    Forms\Components\Repeater::make('business_hours')
+                    Forms\Components\Repeater::make('business_hours_temp')
+                        ->label('Business Hours')
                         ->schema([
                             Forms\Components\Select::make('day')
                                 ->options([
@@ -211,8 +224,10 @@ class EditBusiness extends EditRecord
                                 ->default(false),
                         ])
                         ->columns(4)
+                        ->defaultItems(0)
                         ->collapsible()
-                        ->itemLabel(fn (array $state): ?string => $state['day'] ?? null),
+                        ->itemLabel(fn (array $state): ?string => ucfirst($state['day'] ?? 'New Day'))
+                        ->helperText('Add your operating hours for each day'),
                 ])
                 ->columns(1),
             
@@ -253,18 +268,18 @@ class EditBusiness extends EditRecord
                     Forms\Components\Select::make('payment_methods')
                         ->label('Payment Methods Accepted')
                         ->multiple()
-                        ->relationship('paymentMethods', 'name')
                         ->options(PaymentMethod::where('is_active', true)->pluck('name', 'id'))
                         ->searchable()
-                        ->preload(),
+                        ->preload()
+                        ->helperText('Select all payment methods you accept'),
                     
                     Forms\Components\Select::make('amenities')
                         ->label('Amenities & Features')
                         ->multiple()
-                        ->relationship('amenities', 'name')
                         ->options(Amenity::where('is_active', true)->pluck('name', 'id'))
                         ->searchable()
-                        ->preload(),
+                        ->preload()
+                        ->helperText('Select all amenities available at your business'),
                 ])
                 ->columns(1),
             
@@ -291,14 +306,128 @@ class EditBusiness extends EditRecord
                         ->numeric()
                         ->minValue(0)
                         ->maxValue(100)
+                        ->default(0)
                         ->helperText('How many years have you been operating?'),
                 ])
                 ->columns(3),
+            
+            // Step 7: SEO Settings (Optional)
+            Wizard\Step::make('SEO Settings')
+                ->description('Search engine optimization (optional - you can skip this step)')
+                ->schema([
+                    Forms\Components\Select::make('canonical_strategy')
+                        ->label('Indexing Strategy')
+                        ->options([
+                            'self' => 'Index Separately (Unique business with own SEO)',
+                            'parent' => 'Standard Business',
+                        ])
+                        ->default('self')
+                        ->required()
+                        ->helperText('Most businesses should use "Index Separately"'),
+                    
+                    Forms\Components\TextInput::make('meta_title')
+                        ->maxLength(255)
+                        ->helperText('Custom page title (auto-generated if empty)'),
+                    
+                    Forms\Components\Textarea::make('meta_description')
+                        ->maxLength(255)
+                        ->rows(3)
+                        ->helperText('Custom meta description (auto-generated if empty)'),
+                    
+                    Forms\Components\TagsInput::make('unique_features')
+                        ->helperText('What makes your business unique? (e.g., "24/7 Service", "Award Winning")')
+                        ->placeholder('Add unique features'),
+                    
+                    Forms\Components\Textarea::make('nearby_landmarks')
+                        ->rows(3)
+                        ->helperText('Mention nearby landmarks to help customers find you'),
+                ])
+                ->columns(1),
         ];
+    }
+    
+    protected function mutateFormDataBeforeFill(array $data): array
+    {
+        // Load relationship data
+        $data['categories'] = $this->record->categories()->pluck('categories.id')->toArray();
+        $data['payment_methods'] = $this->record->paymentMethods()->pluck('payment_methods.id')->toArray();
+        $data['amenities'] = $this->record->amenities()->pluck('amenities.id')->toArray();
+        
+        // Transform business_hours from keyed array to repeater format for editing
+        if (isset($data['business_hours']) && is_array($data['business_hours'])) {
+            $businessHoursTemp = [];
+            foreach ($data['business_hours'] as $day => $hours) {
+                $businessHoursTemp[] = [
+                    'day' => $day,
+                    'open' => $hours['open'] ?? null,
+                    'close' => $hours['close'] ?? null,
+                    'closed' => $hours['closed'] ?? false,
+                ];
+            }
+            $data['business_hours_temp'] = $businessHoursTemp;
+        }
+        
+        return $data;
+    }
+    
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        // Transform business_hours from repeater to keyed array
+        if (isset($data['business_hours_temp']) && is_array($data['business_hours_temp'])) {
+            $businessHours = [];
+            foreach ($data['business_hours_temp'] as $hours) {
+                if (isset($hours['day'])) {
+                    $businessHours[$hours['day']] = [
+                        'open' => $hours['open'] ?? null,
+                        'close' => $hours['close'] ?? null,
+                        'closed' => $hours['closed'] ?? false,
+                    ];
+                }
+            }
+            $data['business_hours'] = $businessHours;
+            unset($data['business_hours_temp']);
+        }
+        
+        // Extract relationship data
+        $categories = $data['categories'] ?? [];
+        $paymentMethods = $data['payment_methods'] ?? [];
+        $amenities = $data['amenities'] ?? [];
+        
+        unset($data['categories'], $data['payment_methods'], $data['amenities']);
+        
+        $this->categoriesData = $categories;
+        $this->paymentMethodsData = $paymentMethods;
+        $this->amenitiesData = $amenities;
+        
+        return $data;
+    }
+    
+    protected function afterSave(): void
+    {
+        $business = $this->record;
+        
+        // Sync categories
+        if (isset($this->categoriesData)) {
+            $business->categories()->sync($this->categoriesData);
+        }
+        
+        // Sync payment methods
+        if (isset($this->paymentMethodsData)) {
+            $business->paymentMethods()->sync($this->paymentMethodsData);
+        }
+        
+        // Sync amenities
+        if (isset($this->amenitiesData)) {
+            $business->amenities()->sync($this->amenitiesData);
+        }
     }
     
     protected function getRedirectUrl(): string
     {
         return $this->getResource()::getUrl('view', ['record' => $this->getRecord()]);
     }
+    
+    protected ?array $categoriesData = null;
+    protected ?array $paymentMethodsData = null;
+    protected ?array $amenitiesData = null;
 }
