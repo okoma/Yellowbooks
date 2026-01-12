@@ -207,6 +207,54 @@ class Product extends Model
 
     // ===== SCOPES =====
 
+/**
+ * Scope for products with images
+ */
+public function scopeWithImages(Builder $query): Builder
+{
+    return $query->whereNotNull('image');
+}
+
+/**
+ * Scope for products by price range
+ */
+public function scopePriceRange(Builder $query, $min, $max): Builder
+{
+    return $query->whereBetween('final_price', [$min, $max]);
+}
+
+/**
+ * Scope for expensive products first
+ */
+public function scopeExpensiveFirst(Builder $query): Builder
+{
+    return $query->orderBy('final_price', 'desc');
+}
+
+/**
+ * Scope for cheap products first
+ */
+public function scopeCheapFirst(Builder $query): Builder
+{
+    return $query->orderBy('final_price', 'asc');
+}
+
+/**
+ * Scope for recently added products
+ */
+public function scopeRecent(Builder $query, int $days = 30): Builder
+{
+    return $query->where('created_at', '>=', now()->subDays($days));
+}
+
+/**
+ * Scope for popular products (most viewed/ordered)
+ * Note: You'll need to add view tracking for products first
+ */
+public function scopePopular(Builder $query, int $limit = 10): Builder
+{
+    return $query->orderBy('views_count', 'desc')->limit($limit);
+}
     /**
      * Scope for available products
      */
