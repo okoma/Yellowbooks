@@ -45,7 +45,8 @@ class ViewBranch extends ViewRecord
                             ->label('Main Branch'),
                         
                         Components\TextEntry::make('branch_description')
-                            ->columnSpanFull(),
+                            ->columnSpanFull()
+                            ->visible(fn ($state) => !empty($state)),
                     ])
                     ->columns(3),
                 
@@ -57,7 +58,8 @@ class ViewBranch extends ViewRecord
                         Components\TextEntry::make('city')
                             ->icon('heroicon-o-building-office'),
                         
-                        Components\TextEntry::make('area'),
+                        Components\TextEntry::make('area')
+                            ->visible(fn ($state) => !empty($state)),
                         
                         Components\TextEntry::make('state')
                             ->icon('heroicon-o-globe-alt'),
@@ -78,17 +80,31 @@ class ViewBranch extends ViewRecord
                     ->schema([
                         Components\TextEntry::make('phone')
                             ->icon('heroicon-o-phone')
-                            ->copyable(),
+                            ->copyable()
+                            ->visible(fn ($state) => !empty($state)),
                         
                         Components\TextEntry::make('email')
                             ->icon('heroicon-o-envelope')
-                            ->copyable(),
+                            ->copyable()
+                            ->visible(fn ($state) => !empty($state)),
                         
                         Components\TextEntry::make('whatsapp')
                             ->icon('heroicon-o-chat-bubble-left-right')
-                            ->copyable(),
+                            ->copyable()
+                            ->visible(fn ($state) => !empty($state)),
                     ])
-                    ->columns(3),
+                    ->columns(3)
+                    ->visible(fn ($record) => !empty($record->phone) || !empty($record->email) || !empty($record->whatsapp)),
+                
+                Components\Section::make('Business Hours')
+                    ->schema([
+                        Components\ViewEntry::make('business_hours')
+                            ->view('filament.infolists.business-hours')
+                            ->columnSpanFull(),
+                    ])
+                    ->visible(fn ($record) => !empty($record->business_hours))
+                    ->collapsible()
+                    ->collapsed(),
                 
                 Components\Section::make('Performance Statistics')
                     ->schema([
@@ -124,36 +140,54 @@ class ViewBranch extends ViewRecord
                     ->schema([
                         Components\TextEntry::make('unique_features')
                             ->badge()
-                            ->separator(','),
+                            ->separator(',')
+                            ->visible(fn ($state) => !empty($state)),
                         
                         Components\TextEntry::make('amenities.name')
                             ->label('Amenities')
                             ->badge()
                             ->separator(',')
-                            ->color('success'),
+                            ->color('success')
+                            ->visible(fn ($record) => $record->amenities()->exists()),
                         
                         Components\TextEntry::make('paymentMethods.name')
                             ->label('Payment Methods')
                             ->badge()
                             ->separator(',')
-                            ->color('info'),
+                            ->color('info')
+                            ->visible(fn ($record) => $record->paymentMethods()->exists()),
                     ])
                     ->columns(1)
+                    ->visible(fn ($record) => 
+                        !empty($record->unique_features) || 
+                        $record->amenities()->exists() || 
+                        $record->paymentMethods()->exists()
+                    )
                     ->collapsible()
                     ->collapsed(),
                 
                 Components\Section::make('SEO Settings')
                     ->schema([
                         Components\TextEntry::make('canonical_strategy')
-                            ->badge(),
+                            ->badge()
+                            ->color(fn ($state) => $state === 'self' ? 'success' : 'info'),
                         
-                        Components\TextEntry::make('meta_title'),
+                        Components\TextEntry::make('canonical_url')
+                            ->visible(fn ($state) => !empty($state))
+                            ->url(fn ($state) => $state)
+                            ->openUrlInNewTab(),
                         
-                        Components\TextEntry::make('meta_description'),
+                        Components\TextEntry::make('meta_title')
+                            ->visible(fn ($state) => !empty($state)),
+                        
+                        Components\TextEntry::make('meta_description')
+                            ->visible(fn ($state) => !empty($state))
+                            ->columnSpanFull(),
                         
                         Components\TextEntry::make('content_similarity_score')
                             ->suffix('%')
-                            ->visible(fn ($state) => !empty($state)),
+                            ->visible(fn ($state) => !empty($state))
+                            ->color(fn ($state) => $state > 70 ? 'danger' : ($state > 30 ? 'warning' : 'success')),
                         
                         Components\IconEntry::make('has_unique_content')
                             ->boolean()
@@ -169,6 +203,7 @@ class ViewBranch extends ViewRecord
                             ->columnSpanFull()
                             ->limit(10),
                     ])
+                    ->visible(fn ($record) => !empty($record->gallery))
                     ->collapsible()
                     ->collapsed(),
                 
@@ -183,8 +218,11 @@ class ViewBranch extends ViewRecord
                         
                         Components\TextEntry::make('updated_at')
                             ->dateTime(),
+                        
+                        Components\TextEntry::make('slug')
+                            ->copyable(),
                     ])
-                    ->columns(3)
+                    ->columns(4)
                     ->collapsible()
                     ->collapsed(),
             ]);
