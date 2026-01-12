@@ -61,8 +61,17 @@ class ViewBusiness extends ViewRecord
                         Components\TextEntry::make('city')
                             ->icon('heroicon-o-building-office'),
                         
+                        Components\TextEntry::make('area')
+                            ->visible(fn ($state) => !empty($state)),
+                        
                         Components\TextEntry::make('state')
                             ->icon('heroicon-o-globe-alt'),
+                        
+                        Components\TextEntry::make('latitude')
+                            ->visible(fn ($state) => !empty($state)),
+                        
+                        Components\TextEntry::make('longitude')
+                            ->visible(fn ($state) => !empty($state)),
                         
                         Components\TextEntry::make('phone')
                             ->icon('heroicon-o-phone')
@@ -80,8 +89,22 @@ class ViewBusiness extends ViewRecord
                             ->icon('heroicon-o-globe-alt')
                             ->url(fn ($state) => $state)
                             ->openUrlInNewTab(),
+                        
+                        Components\TextEntry::make('nearby_landmarks')
+                            ->columnSpanFull()
+                            ->visible(fn ($state) => !empty($state)),
                     ])
                     ->columns(3),
+                
+                Components\Section::make('Business Hours')
+                    ->schema([
+                        Components\ViewEntry::make('business_hours')
+                            ->view('filament.infolists.business-hours')
+                            ->columnSpanFull(),
+                    ])
+                    ->visible(fn ($record) => !empty($record->business_hours))
+                    ->collapsible()
+                    ->collapsed(),
                 
                 Components\Section::make('Business Status')
                     ->schema([
@@ -153,9 +176,70 @@ class ViewBusiness extends ViewRecord
                         Components\TextEntry::make('branches_count')
                             ->label('Total Branches')
                             ->badge()
-                            ->color('info'),
+                            ->color('info')
+                            ->state(fn ($record) => $record->branches()->count()),
                     ])
                     ->columns(3),
+                
+                Components\Section::make('Features & Amenities')
+                    ->schema([
+                        Components\TextEntry::make('unique_features')
+                            ->badge()
+                            ->separator(',')
+                            ->visible(fn ($state) => !empty($state)),
+                        
+                        Components\TextEntry::make('amenities.name')
+                            ->label('Amenities')
+                            ->badge()
+                            ->separator(',')
+                            ->color('success')
+                            ->visible(fn ($record) => $record->amenities()->exists()),
+                        
+                        Components\TextEntry::make('paymentMethods.name')
+                            ->label('Payment Methods')
+                            ->badge()
+                            ->separator(',')
+                            ->color('info')
+                            ->visible(fn ($record) => $record->paymentMethods()->exists()),
+                    ])
+                    ->columns(1)
+                    ->visible(fn ($record) => 
+                        !empty($record->unique_features) || 
+                        $record->amenities()->exists() || 
+                        $record->paymentMethods()->exists()
+                    )
+                    ->collapsible()
+                    ->collapsed(),
+                
+                Components\Section::make('SEO Settings')
+                    ->schema([
+                        Components\TextEntry::make('canonical_strategy')
+                            ->badge()
+                            ->color(fn ($state) => $state === 'self' ? 'success' : 'info'),
+                        
+                        Components\TextEntry::make('canonical_url')
+                            ->visible(fn ($state) => !empty($state))
+                            ->url(fn ($state) => $state)
+                            ->openUrlInNewTab(),
+                        
+                        Components\TextEntry::make('meta_title')
+                            ->visible(fn ($state) => !empty($state)),
+                        
+                        Components\TextEntry::make('meta_description')
+                            ->visible(fn ($state) => !empty($state))
+                            ->columnSpanFull(),
+                        
+                        Components\IconEntry::make('has_unique_content')
+                            ->boolean()
+                            ->label('Has Unique Content'),
+                        
+                        Components\TextEntry::make('content_similarity_score')
+                            ->suffix('%')
+                            ->visible(fn ($state) => !empty($state)),
+                    ])
+                    ->columns(3)
+                    ->collapsible()
+                    ->collapsed(),
                 
                 Components\Section::make('Legal Information')
                     ->schema([
@@ -174,12 +258,32 @@ class ViewBusiness extends ViewRecord
                 Components\Section::make('Media')
                     ->schema([
                         Components\ImageEntry::make('cover_photo')
-                            ->columnSpanFull(),
+                            ->columnSpanFull()
+                            ->visible(fn ($state) => !empty($state)),
                         
                         Components\ImageEntry::make('gallery')
                             ->columnSpanFull()
-                            ->limit(10),
+                            ->limit(10)
+                            ->visible(fn ($state) => !empty($state)),
                     ])
+                    ->visible(fn ($record) => !empty($record->cover_photo) || !empty($record->gallery))
+                    ->collapsible()
+                    ->collapsed(),
+                
+                Components\Section::make('System Information')
+                    ->schema([
+                        Components\TextEntry::make('created_at')
+                            ->dateTime()
+                            ->label('Created'),
+                        
+                        Components\TextEntry::make('updated_at')
+                            ->dateTime()
+                            ->label('Last Updated'),
+                        
+                        Components\TextEntry::make('slug')
+                            ->copyable(),
+                    ])
+                    ->columns(3)
                     ->collapsible()
                     ->collapsed(),
             ]);
