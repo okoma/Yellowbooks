@@ -67,7 +67,68 @@ class SocialAccount extends Model
     // ============================================
     // Helper Methods
     // ============================================
-    
+    // ✅ Add parent() helper
+public function parent()
+{
+    return $this->business_id ? $this->business : $this->businessBranch;
+}
+
+// ✅ Add validation checks
+public function isForBusiness(): bool
+{
+    return !is_null($this->business_id);
+}
+
+public function isForBranch(): bool
+{
+    return !is_null($this->business_branch_id);
+}
+
+// ✅ Add boot validation method
+protected static function booted()
+{
+    static::creating(function ($socialAccount) {
+        // Ensure belongs to either business OR branch, not both
+        if ($socialAccount->business_id && $socialAccount->business_branch_id) {
+            throw new \InvalidArgumentException(
+                'SocialAccount cannot belong to both business and branch. Choose one.'
+            );
+        }
+
+        // Ensure belongs to at least one
+        if (!$socialAccount->business_id && !$socialAccount->business_branch_id) {
+            throw new \InvalidArgumentException(
+                'SocialAccount must belong to either a business or a branch.'
+            );
+        }
+    });
+
+    static::updating(function ($socialAccount) {
+        // Prevent changing parent after creation
+        if ($socialAccount->isDirty(['business_id', 'business_branch_id'])) {
+            $original = $socialAccount->getOriginal();
+            if (($original['business_id'] && $socialAccount->business_branch_id) || 
+                ($original['business_branch_id'] && $socialAccount->business_id)) {
+                throw new \InvalidArgumentException(
+                    'Cannot change social account from business to branch or vice versa.'
+                );
+            }
+        }
+    });
+}
+
+// ✅ Add helpful scopes
+public function scopeForBusiness($query, int $businessId)
+{
+    return $query->where('business_id', $businessId);
+}
+
+public function scopeForBranch($query, int $branchId)
+{
+    return $query->where('business_branch_id', $branchId);
+}
+  
+  
     public function getPlatformIcon()
     {
         $icons = [
